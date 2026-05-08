@@ -1,0 +1,23 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: awesome-journal-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - db_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "127.0.0.1:5432:5432"
+    mem_limit: 256m
+    mem_reservation: 128m
+
+volumes:
+  db_data:
