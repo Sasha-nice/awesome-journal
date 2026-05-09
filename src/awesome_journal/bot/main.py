@@ -1,16 +1,24 @@
-"""Bot entry point."""
+"""Bot entry point — composition root.
+
+Orchestrates two frontends (Telegram polling + HTTP /health) sharing a
+single AsyncExitStack so resources and runners unwind LIFO on shutdown.
+"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import sys
+from contextlib import AsyncExitStack
 
-from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiohttp import web
 
-from awesome_journal.bot.config import BotConfig
-from awesome_journal.bot.handlers import start as start_handlers
+from awesome_journal import resources
+from awesome_journal.bot.http import build_http_app
+from awesome_journal.bot.telegram import build_telegram
+from awesome_journal.db.storage import Storage
+from awesome_journal.settings import AppSettings
+
+log = logging.getLogger("bot")
 
 
 def setup_logging() -> None:
@@ -21,29 +29,54 @@ def setup_logging() -> None:
     )
 
 
-async def run() -> None:
-    setup_logging()
-    log = logging.getLogger("bot")
-
-    config = BotConfig.from_env()
-    if config.emergency_stop:
-        log.warning("EMERGENCY_STOP is true — bot is configured to be silent.")
-        return
-
-    bot = Bot(
-        token=config.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+async def run_http(
+    stack: AsyncExitStack,
+    settings: AppSettings,
+    *,
+    storage: Storage,
+) -> None:
+    """Start the HTTP frontend. Returns once the server is listening;
+    cleanup is registered on `stack`."""
+    app = build_http_app(storage=storage)
+    runner = web.AppRunner(app, access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, settings.health_host, settings.health_port).start()
+    stack.push_async_callback(runner.cleanup)
+    log.info(
+        "Health server listening on http://%s:%d/health",
+        settings.health_host,
+        settings.health_port,
     )
-    dp = Dispatcher()
-    dp.include_router(start_handlers.router)
+
+
+async def run_telegram(stack: AsyncExitStack, settings: AppSettings) -> None:
+    """Start the Telegram frontend. Blocks until polling stops; bot
+    session close is registered on `stack`."""
+    bot, dp = build_telegram(token=settings.bot_token)
+    stack.push_async_callback(bot.session.close)
 
     log.info("Starting bot in long-polling mode...")
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
-    finally:
-        await bot.session.close()
-        log.info("Bot stopped.")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+
+async def run() -> None:
+    setup_logging()
+
+    settings = AppSettings()
+    if settings.emergency_stop:
+        log.warning("EMERGENCY_STOP is true — bot will not start.")
+        return
+
+    async with AsyncExitStack() as stack:
+        pool = await stack.enter_async_context(resources.db_pool(settings.db_dsn))
+        storage = Storage(pool)
+
+        await run_http(stack, settings, storage=storage)
+        try:
+            await run_telegram(stack, settings)
+        finally:
+            log.info("Shutting down...")
 
 
 def main() -> None:
