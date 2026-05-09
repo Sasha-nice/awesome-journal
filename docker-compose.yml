@@ -19,5 +19,19 @@ services:
     mem_limit: 256m
     mem_reservation: 128m
 
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: awesome-journal-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 256m
+    mem_reservation: 128m
+
 volumes:
   db_data:
