@@ -1,9 +1,7 @@
-"""Telegram frontend: builds Bot + Dispatcher with handlers wired in.
+"""Telegram frontend: builds Bot + Dispatcher with handlers + middlewares wired in.
 
 The composition root calls `build_telegram` and passes only the
-resources Telegram-side handlers actually need. Today that's just the
-token — when a handler starts using the DB pool, add `pool` to the
-signature and stash it in `dp[...]` for aiogram's per-handler injection.
+resources Telegram-side handlers/middlewares actually need.
 """
 from __future__ import annotations
 
@@ -13,13 +11,20 @@ from aiogram.enums import ParseMode
 from pydantic import SecretStr
 
 from awesome_journal.bot.handlers import start as start_handlers
+from awesome_journal.bot.middlewares.allowlist import AllowlistMiddleware
+from awesome_journal.controllers.allowlist import AllowlistController
 
 
-def build_telegram(*, token: SecretStr) -> tuple[Bot, Dispatcher]:
+def build_telegram(
+    *,
+    token: SecretStr,
+    allowlist: AllowlistController,
+) -> tuple[Bot, Dispatcher]:
     bot = Bot(
         token=token.get_secret_value(),
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+    dp.update.outer_middleware(AllowlistMiddleware(allowlist))
     dp.include_router(start_handlers.router)
     return bot, dp

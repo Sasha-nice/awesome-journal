@@ -21,9 +21,15 @@ class Storage:
         self._pool = pool
 
     def acquire(self) -> asyncpg.pool.PoolAcquireContext:
-        """Acquire a connection. Used by `@inject_conn`."""
         return self._pool.acquire()
 
     async def ping(self, conn: asyncpg.Connection) -> bool:
-        """True iff the DB answers `SELECT 1` with 1."""
         return await conn.fetchval("SELECT 1") == 1
+
+    async def user_is_allowed(self, conn: asyncpg.Connection, user_id: int) -> bool:
+        return bool(
+            await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM allowed_users WHERE user_id = $1)",
+                user_id,
+            )
+        )

@@ -15,6 +15,7 @@ from aiohttp import web
 from awesome_journal import resources
 from awesome_journal.bot.http import build_http_app
 from awesome_journal.bot.telegram import build_telegram
+from awesome_journal.controllers.allowlist import AllowlistController
 from awesome_journal.db.storage import Storage
 from awesome_journal.settings import AppSettings
 
@@ -49,10 +50,15 @@ async def run_http(
     )
 
 
-async def run_telegram(stack: AsyncExitStack, settings: AppSettings) -> None:
+async def run_telegram(
+    stack: AsyncExitStack,
+    settings: AppSettings,
+    *,
+    allowlist: AllowlistController,
+) -> None:
     """Start the Telegram frontend. Blocks until polling stops; bot
     session close is registered on `stack`."""
-    bot, dp = build_telegram(token=settings.bot_token)
+    bot, dp = build_telegram(token=settings.bot_token, allowlist=allowlist)
     stack.push_async_callback(bot.session.close)
 
     log.info("Starting bot in long-polling mode...")
@@ -71,10 +77,11 @@ async def run() -> None:
     async with AsyncExitStack() as stack:
         pool = await stack.enter_async_context(resources.db_pool(settings.db_dsn))
         storage = Storage(pool)
+        allowlist = AllowlistController(storage)
 
         await run_http(stack, settings, storage=storage)
         try:
-            await run_telegram(stack, settings)
+            await run_telegram(stack, settings, allowlist=allowlist)
         finally:
             log.info("Shutting down...")
 
