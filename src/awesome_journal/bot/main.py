@@ -15,6 +15,7 @@ from aiohttp import web
 from awesome_journal import resources
 from awesome_journal.bot.http import build_http_app
 from awesome_journal.bot.telegram import build_telegram
+from awesome_journal.clients import GeminiClient, LLMClient
 from awesome_journal.controllers.allowlist import AllowlistController
 from awesome_journal.db.storage import Storage
 from awesome_journal.settings import AppSettings
@@ -78,6 +79,11 @@ async def run() -> None:
         pool = await stack.enter_async_context(resources.db_pool(settings.db_dsn))
         storage = Storage(pool)
         allowlist = AllowlistController(storage)
+
+        llm: LLMClient = GeminiClient(  # noqa: F841 — protocol-typed binding for next task
+            api_key=settings.gemini_api_key.get_secret_value(),
+            model=settings.gemini_model,
+        )
 
         await run_http(stack, settings, storage=storage)
         try:
