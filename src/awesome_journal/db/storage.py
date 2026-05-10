@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 from awesome_journal.models.entity import Entity, TaskCategory
 
 if TYPE_CHECKING:
+    from datetime import date, datetime
+
     import asyncpg
 
 
@@ -139,3 +141,122 @@ class Storage:
         )
         assert row is not None
         return TaskCategory.model_validate(dict(row))
+
+    # ----- events (parent + per-type children) -----
+
+    async def create_event(
+        self,
+        user_id: int,
+        event_type: str,
+        occurred_at: datetime,
+        raw_text: str,
+        *,
+        conn: asyncpg.Connection,
+    ) -> int:
+        """Создаёт запись в events, возвращает event_id для child INSERT."""
+        event_id = await conn.fetchval(
+            """
+            INSERT INTO events (user_id, type, occurred_at, raw_text)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            user_id,
+            event_type,
+            occurred_at,
+            raw_text,
+        )
+        assert event_id is not None  # RETURNING всегда возвращает после INSERT
+        return event_id
+
+    async def create_fact_event(
+        self,
+        event_id: int,
+        entity_id: int,
+        *,
+        conn: asyncpg.Connection,
+    ) -> None:
+        await conn.execute(
+            """
+            INSERT INTO fact_events (event_id, entity_id)
+            VALUES ($1, $2)
+            """,
+            event_id,
+            entity_id,
+        )
+
+    async def create_measurement_event(
+        self,
+        event_id: int,
+        entity_id: int,
+        value: float,
+        unit: str,
+        *,
+        conn: asyncpg.Connection,
+    ) -> None:
+        await conn.execute(
+            """
+            INSERT INTO measurement_events (event_id, entity_id, value, unit)
+            VALUES ($1, $2, $3, $4)
+            """,
+            event_id,
+            entity_id,
+            value,
+            unit,
+        )
+
+    async def create_task_event(
+        self,
+        event_id: int,
+        title: str,
+        category_id: int | None,
+        due_date: date | None,
+        *,
+        conn: asyncpg.Connection,
+    ) -> None:
+        """category_id опционально (после миграции 0003 NULLABLE).
+
+        priority и done_at не передаются — используются дефолты схемы
+        (priority=0, done_at=NULL).
+        """
+        await conn.execute(
+            """
+            INSERT INTO task_events (event_id, title, category_id, due_date)
+            VALUES ($1, $2, $3, $4)
+            """,
+            event_id,
+            title,
+            category_id,
+            due_date,
+        )
+
+    async def create_note_event(
+        self,
+        event_id: int,
+        text: str,
+        *,
+        conn: asyncpg.Connection,
+    ) -> None:
+        await conn.execute(
+            """
+            INSERT INTO note_events (event_id, text)
+            VALUES ($1, $2)
+            """,
+            event_id,
+            text,
+        )
+
+    async def create_idea_event(
+        self,
+        event_id: int,
+        text: str,
+        *,
+        conn: asyncpg.Connection,
+    ) -> None:
+        await conn.execute(
+            """
+            INSERT INTO idea_events (event_id, text)
+            VALUES ($1, $2)
+            """,
+            event_id,
+            text,
+        )
