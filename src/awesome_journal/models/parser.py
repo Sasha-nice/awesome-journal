@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from awesome_journal.models.entity import Entity, TaskCategory
+
 # ============================================================
 # Context (input для парсера)
 # ============================================================
@@ -213,3 +215,22 @@ def to_typed(raw: RawParsedEvent) -> ParsedEvent | None:
                 text=raw.text,
                 occurred_at=raw.occurred_at,
             )
+
+
+# ============================================================
+# DB → Hint конверсии (для построения ParserContext в хендлере)
+# ============================================================
+
+
+def entity_to_hint(e: Entity) -> EntityHint:
+    """Конвертирует DB-сущность в подсказку для парсера.
+
+    Парсер не нуждается в id/user_id/created_at — только name + aliases
+    для нормализации.
+    """
+    return EntityHint(name=e.name, aliases=e.aliases)
+
+
+def category_to_hint(c: TaskCategory) -> CategoryHint:
+    """Конвертирует DB-категорию задачи в подсказку для парсера."""
+    return CategoryHint(name=c.name, aliases=c.aliases)

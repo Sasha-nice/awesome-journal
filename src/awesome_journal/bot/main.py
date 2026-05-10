@@ -59,10 +59,19 @@ async def run_telegram(
     settings: AppSettings,
     *,
     allowlist: AllowlistController,
+    parser: ParserController,
+    events: EventsController,
+    entities: EntitiesController,
 ) -> None:
     """Start the Telegram frontend. Blocks until polling stops; bot
     session close is registered on `stack`."""
-    bot, dp = build_telegram(token=settings.bot_token, allowlist=allowlist)
+    bot, dp = build_telegram(
+        token=settings.bot_token,
+        allowlist=allowlist,
+        parser=parser,
+        events=events,
+        entities=entities,
+    )
     stack.push_async_callback(bot.session.close)
 
     log.info("Starting bot in long-polling mode...")
@@ -83,19 +92,24 @@ async def run() -> None:
         storage = Storage(pool)
         allowlist = AllowlistController(storage)
         entities_controller = EntitiesController(storage)
-        events_controller = EventsController(  # noqa: F841 — для Task 11
-            storage, entities_controller
-        )
 
         llm: LLMClient = GeminiClient(
             api_key=settings.gemini_api_key.get_secret_value(),
             model=settings.gemini_model,
         )
-        parser_controller = ParserController(llm)  # noqa: F841 — будет передан в Task 11
+        parser_controller = ParserController(llm)
+        events_controller = EventsController(storage, entities_controller)
 
         await run_http(stack, settings, storage=storage)
         try:
-            await run_telegram(stack, settings, allowlist=allowlist)
+            await run_telegram(
+                stack,
+                settings,
+                allowlist=allowlist,
+                parser=parser_controller,
+                events=events_controller,
+                entities=entities_controller,
+            )
         finally:
             log.info("Shutting down...")
 
