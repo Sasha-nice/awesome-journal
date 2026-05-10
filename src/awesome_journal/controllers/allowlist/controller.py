@@ -26,7 +26,7 @@ class AllowlistController:
         self, user_id: int, *, conn: asyncpg.Connection
     ) -> Result[bool]:
         try:
-            allowed = await self._storage.user_is_allowed(conn, user_id)
+            allowed = await self._storage.user_is_allowed(user_id, conn=conn)
             return Result.success(allowed)
         except Exception as e:
             log.warning("is_allowed check failed: %s", e)

@@ -17,6 +17,7 @@ from awesome_journal.bot.http import build_http_app
 from awesome_journal.bot.telegram import build_telegram
 from awesome_journal.clients import GeminiClient, LLMClient
 from awesome_journal.controllers.allowlist import AllowlistController
+from awesome_journal.controllers.entities.controller import EntitiesController
 from awesome_journal.controllers.parser.controller import ParserController
 from awesome_journal.db.storage import Storage
 from awesome_journal.settings import AppSettings
@@ -80,6 +81,7 @@ async def run() -> None:
         pool = await stack.enter_async_context(resources.db_pool(settings.db_dsn))
         storage = Storage(pool)
         allowlist = AllowlistController(storage)
+        entities_controller = EntitiesController(storage)  # noqa: F841 — для Task 10/11
 
         llm: LLMClient = GeminiClient(
             api_key=settings.gemini_api_key.get_secret_value(),

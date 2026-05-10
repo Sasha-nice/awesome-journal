@@ -30,7 +30,7 @@ class HealthController:
     @inject_conn
     async def check(self, *, conn: asyncpg.Connection) -> Result[HealthStatus]:
         try:
-            alive = await self._storage.ping(conn)
+            alive = await self._storage.ping(conn=conn)
             return Result.success(HealthStatus(db_alive=alive))
         except Exception as e:
             log.warning("Health check SQL failed: %s", e)

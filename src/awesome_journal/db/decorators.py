@@ -1,6 +1,7 @@
 """Decorators for controllers."""
 from __future__ import annotations
 
+import contextvars
 import logging
 from collections.abc import Awaitable, Callable
 from functools import wraps
@@ -49,5 +50,57 @@ def inject_conn[T](
         except Exception as e:
             log.warning("inject_conn: failed to acquire connection: %s", e)
             return Result.failure(str(e))
+
+    return wrapper
+
+
+# Контекст-переменная для детектирования вложенности @inject_tx.
+# Сбрасывается в default (False) при выходе из обёртки.
+_in_tx: contextvars.ContextVar[bool] = contextvars.ContextVar("_in_tx", default=False)
+
+
+def inject_tx[T](
+    method: Callable[..., Awaitable[Result[T]]],
+) -> Callable[..., Awaitable[Result[T]]]:
+    """Открывает транзакцию для метода контроллера.
+
+    Контракт:
+    - Метод должен принимать `conn: asyncpg.Connection` как kwarg
+    - Возвращает `Result[T]` — на success коммитит, на failure откатывает
+    - На exception — откатывает + возвращает `Result.failure("tx error: ...")`
+    - Запрещена вложенность: если уже в `@inject_tx` — raise `RuntimeError`
+
+    DECISION: Result.failure тоже триггерит rollback (а не commit).
+    Why: failure означает что контроллер счёл результат невалидным;
+         частичные записи в БД хуже чем чистый откат.
+    Trade-off: невозможно сохранить частичный результат при failure;
+               принимаем — у нас единичные события, частичность бессмысленна.
+    """
+
+    @wraps(method)
+    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Result[T]:
+        if _in_tx.get():
+            raise RuntimeError(
+                "@inject_tx вложен в другой @inject_tx — запрещено"
+            )
+
+        async with self._storage.acquire() as conn:
+            token = _in_tx.set(True)
+            try:
+                tx = conn.transaction()
+                await tx.start()
+                try:
+                    result = await method(self, *args, conn=conn, **kwargs)
+                except Exception as e:
+                    await tx.rollback()
+                    return Result.failure(f"tx error: {type(e).__name__}: {e}")
+
+                if result.ok:
+                    await tx.commit()
+                else:
+                    await tx.rollback()
+                return result
+            finally:
+                _in_tx.reset(token)
 
     return wrapper
